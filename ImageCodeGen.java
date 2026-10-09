@@ -1,6 +1,4 @@
 import java.awt.Color;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -10,6 +8,29 @@ import java.nio.file.Path;
 import javax.imageio.ImageIO;
 
 public class ImageCodeGen {
+    private static String encodeColorCode(char[] colorCode) {
+        StringBuilder encoded = new StringBuilder(colorCode.length);
+        for (int start = 0; start < colorCode.length;) {
+            int end = start + 1;
+            while (end < colorCode.length && colorCode[end] == colorCode[start]) {
+                end++;
+            }
+
+            int runLength = end - start;
+            int encodedRunLength = Integer.toString(runLength).length() + 4;
+            if (runLength > encodedRunLength) {
+                encoded.append('[').append(runLength).append('*').append(colorCode[start]).append(']');
+            } else {
+                encoded.append(colorCode, start, runLength);
+            }
+            start = end;
+        }
+
+        return encoded.length() < colorCode.length
+            ? encoded.toString()
+            : new String(colorCode);
+    }
+
     public static void main(String[] args) {
         try {
             if (args.length == 0) {
@@ -47,34 +68,37 @@ public class ImageCodeGen {
 
             float BWThreshold = 0.25f;
             
-            String colorCode="";
+            char[] colorCode = new char[segmentsX * segmentsY];
+            int colorIndex = 0;
+            float[] hsb = new float[3];
             for(int i=0;i<segmentsY;i++){for(int t=0;t<segmentsX;t++){   
                 
 
                 int sampleX = (int) (((long) (2 * t + 1) * imageWidth) / (2L * segmentsX));
                 int sampleY = (int) (((long) (2 * i + 1) * ImageHeight) / (2L * segmentsY));
                 int colorAtSpot = image.getRGB(sampleX, sampleY);
+                int red = (colorAtSpot >> 16) & 0xff;
+                int green = (colorAtSpot >> 8) & 0xff;
+                int blue = colorAtSpot & 0xff;
                 // System.out.println(i*(maxX/segmentsX));
                 // System.out.println(t*(maxY/segmentsY));
-                
-                Color color = new Color(colorAtSpot, true);
            
-                int colorAvrg = (color.getBlue()+color.getGreen()+color.getRed())/3;
+                int colorAvrg = (blue + green + red) / 3;
                 //System.out.println(RGB);
 
 
                 // Classify chromatic colors by hue, then use saturation and brightness
                 // to distinguish neutral colors and the darker palette variants.
                 //       RGB to Hue Saturation Brightness
-                float[] hsb = Color.RGBtoHSB(color.getRed(), color.getGreen(), color.getBlue(), null);
+                Color.RGBtoHSB(red, green, blue, hsb);
                 char compressedColor;
                 //black/white check
-                if (hsb[1] < BWThreshold*0.7) {
+                if (hsb[1] < BWThreshold*0.75) {
                     compressedColor = hsb[2] >= 0.5f ? '1' : '0'; // white or black
                 //second black/white check
-                } else if(Math.abs(color.getRed() - colorAvrg) <= colorAvrg * BWThreshold
-                    && Math.abs(color.getBlue() - colorAvrg) <= colorAvrg * BWThreshold
-                    && Math.abs(color.getGreen() - colorAvrg) <= colorAvrg * BWThreshold){
+                } else if(Math.abs(red - colorAvrg) <= colorAvrg * BWThreshold
+                    && Math.abs(blue - colorAvrg) <= colorAvrg * BWThreshold
+                    && Math.abs(green - colorAvrg) <= colorAvrg * BWThreshold){
                         compressedColor='0';//black
 
                         if(colorAvrg>128){
@@ -100,10 +124,10 @@ public class ImageCodeGen {
                     }
                 }
                 
-                if(color.getAlpha()<100){
+                if((colorAtSpot >>> 24) < 100){
                     compressedColor=' ';
                 }
-                colorCode+=compressedColor;
+                colorCode[colorIndex++] = compressedColor;
                     }
                 }
                 // System.out.println(colorCode);
@@ -117,7 +141,10 @@ public class ImageCodeGen {
                      String outputFileName = extensionIndex > 0
                          ? inputFileName.substring(0, extensionIndex) + ".wpdi"
                          : inputFileName + ".wpdi";
-                     Files.writeString(Path.of(WPDIFolder, outputFileName), segmentsX +"::"+ colorCode);
+                     Files.writeString(
+                         Path.of(WPDIFolder, outputFileName),
+                         segmentsX + "::" + encodeColorCode(colorCode)
+                     );
                      System.out.println("File created and written successfully!");
                  } catch (IOException e) {
                      System.err.println("An error occurred: " + e.getMessage());
